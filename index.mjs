@@ -1,27 +1,51 @@
-import {loadStdlib} from '@reach-sh/stdlib';
-import * as backend from './build/index.main.mjs';
-const stdlib = loadStdlib(process.env);
+import { loadStdlib } from "@reach-sh/stdlib";
+import * as backend from "./build/index.main.mjs";
 
+const numOfBuyers = 10;
+
+const stdlib = loadStdlib();
 const startingBalance = stdlib.parseCurrency(100);
 
-const [ accAlice, accBob ] =
-  await stdlib.newTestAccounts(2, startingBalance);
-console.log('Hello, Alice and Bob!');
+const accFunder = await stdlib.newTestAccount(startingBalance);
+const accBuyerArray = await Promise.all(
+  Array.from({ length: numOfBuyers }, () =>
+    stdlib.newTestAccount(startingBalance)
+  )
+);
 
-console.log('Launching...');
-const ctcAlice = accAlice.contract(backend);
-const ctcBob = accBob.contract(backend, ctcAlice.getInfo());
+const ctcFunder = accFunder.contract(backend);
+const ctcInfo = ctcFunder.getInfo();
 
-console.log('Starting backends...');
-await Promise.all([
-  backend.Alice(ctcAlice, {
-    ...stdlib.hasRandom,
-    // implement Alice's interact object here
-  }),
-  backend.Bob(ctcBob, {
-    ...stdlib.hasRandom,
-    // implement Bob's interact object here
-  }),
-]);
+const funderParams = {
+  ticketPrice: stdlib.parseCurrency(5),
+  deadline: 5,
+};
 
-console.log('Goodbye, Alice and Bob!');
+await Promise.all(
+  [
+    backend.Funder(ctcFunder, {
+      showOutcome: (addr) =>
+        console.log(`Funder saw ${stdlib.formatAddress(addr)} won.`),
+      getParams: () => funderParams,
+    }),
+  ].concat(
+    accBuyerArray.map((accBuyer, i) => {
+      const ctcBuyer = accBuyer.contract(backend, ctcInfo);
+      return backend.Buyer(ctcBuyer, {
+        showOutcome: (outcome) => {
+          console.log(
+            `Buyer ${i} saw they ${
+              stdlib.addressEq(outcome, accBuyer) ? "won" : "lost"
+            }.`
+          );
+        },
+        shouldBuyTicket: () => Math.random() < 0.5,
+        showPurchase: (addr) => {
+          if (stdlib.addressEq(addr, accBuyer)) {
+            console.log(`Buyer ${i} bought a ticket.`);
+          }
+        },
+      });
+    })
+  )
+);
